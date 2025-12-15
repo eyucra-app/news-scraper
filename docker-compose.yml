@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:15-alpine
+    container_name: newscrapper_db
+    environment:
+      POSTGRES_USER: newscrapper
+      POSTGRES_PASSWORD: newscrapper_password
+      POSTGRES_DB: newscrapper
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U newscrapper" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - newscrapper_network
+
+  # Redis para caché
+  redis:
+    image: redis:7-alpine
+    container_name: newscrapper_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - newscrapper_network
+
+  # Backend FastAPI
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: newscrapper_backend
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://newscrapper:newscrapper_password@db:5432/newscrapper
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    restart: unless-stopped
+    networks:
+      - newscrapper_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  newscrapper_network:
+    driver: bridge

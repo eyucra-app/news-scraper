@@ -1,0 +1,661 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import {
+    controlTicker,
+    getConfig,
+    startTickerRotation,
+    stopTickerRotation,
+    getTickerRotationStatus,
+    updateSchedulerInterval,
+    startAutoMode,
+    stopAutoMode,
+    getAutoModeStatus,
+    type AutoModeStatus
+} from '@/lib/api';
+import { ModeToggle, ManualControls, AutoControls } from '@/components/TickerModeComponents';
+
+export default function TickerPage() {
+    // Modo de operación: manual o automático
+    const [mode, setMode] = useState<'manual' | 'auto'>('manual');
+
+    // Estado modo automático
+    const [autoStatus, setAutoStatus] = useState<AutoModeStatus | null>(null);
+
+    // Estados existentes
+    const [tickerState, setTickerState] = useState<'In' | 'Out'>('Out');
+    const [category, setCategory] = useState('mundo');
+    const [separatorUrl, setSeparatorUrl] = useState('https://assets.singular.live/7072b13f9e20b98034f48d6202400ff9/svgs/7esb5NbN8cQxcCk7X0szej_w24h24.svg');
+    const [showSourceName, setShowSourceName] = useState(true);
+    // autoScrape siempre está en true - scraping automático SIEMPRE activo
+    const autoScrape = true;  // Hardcoded - SIEMPRE scrapea antes de mostrar ticker
+    const [autoRotate, setAutoRotate] = useState(false);
+    const [rotationInterval, setRotationInterval] = useState(60);
+    const [schedulerInterval, setSchedulerInterval] = useState(10);  // Intervalo scheduler
+    const [message, setMessage] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [outputUrl, setOutputUrl] = useState('');
+    const [mounted, setMounted] = useState(false); // Flag para evitar hidratación mismatch
+
+    useEffect(() => {
+        async function initializeState() {
+            // Marcar como montado en cliente (después de SSR)
+            setMounted(true);
+
+            // 1. Cargar estado desde localStorage PRIMERO
+            const savedCategory = localStorage.getItem('ticker_category');
+            const savedTickerState = localStorage.getItem('ticker_state');
+            const savedShowSourceName = localStorage.getItem('ticker_show_source_name');
+            const savedRotationInterval = localStorage.getItem('ticker_rotation_interval');
+            const savedSchedulerInterval = localStorage.getItem('ticker_scheduler_interval');
+            const savedSeparatorUrl = localStorage.getItem('ticker_separator_url');
+
+            if (savedCategory) setCategory(savedCategory);
+            if (savedTickerState) setTickerState(savedTickerState as 'In' | 'Out');
+            if (savedShowSourceName) setShowSourceName(savedShowSourceName === 'true');
+            if (savedRotationInterval) setRotationInterval(parseInt(savedRotationInterval));
+            if (savedSchedulerInterval) setSchedulerInterval(parseInt(savedSchedulerInterval));
+            if (savedSeparatorUrl) setSeparatorUrl(savedSeparatorUrl);
+
+            // 2. Esperar un tick para que los setState se apliquen
+            await new Promise(resolve => setTimeout(resolve, 0));
+
+            // 3. Luego cargar config (NO sobrescribe nada importante)
+            await loadConfig();
+
+            // 4. Verificar estado del backend - SOLO sincronizar intervalo y autoRotate
+            // NO sobrescribir categoría (Opción B: "todas" persiste desde localStorage)
+            try {
+                const response = await getTickerRotationStatus();
+                const isRunning = response.rotation_status.is_running;
+
+                // Sincronizar autoRotate e intervalo con backend
+                if (isRunning) {
+                    setAutoRotate(true);
+                    // Solo actualizar intervalo si es diferente
+                    const backendInterval = response.rotation_status.interval_seconds;
+                    if (backendInterval !== rotationInterval) {
+                        setRotationInterval(backendInterval);
+                    }
+                } else {
+                    setAutoRotate(false);
+                }
+                // NO tocar category - respeta localStorage (Opción B)
+            } catch (error) {
+                console.error('Error loading rotation status:', error);
+                // Si hay error de red, mantener valores de localStorage
+            }
+        }
+
+        initializeState();
+    }, []);
+
+    async function loadConfig() {
+        try {
+            const config = await getConfig();
+            if (config.singular.output_url) {
+                setOutputUrl(`${config.singular.output_url}?aspect=16:9`);
+            }
+        } catch (error) {
+            console.error('Error loading config:', error);
+        }
+    }
+
+    // Guardar en localStorage cuando cambian los valores
+    useEffect(() => {
+        localStorage.setItem('ticker_category', category);
+    }, [category]);
+
+    useEffect(() => {
+        localStorage.setItem('ticker_state', tickerState);
+    }, [tickerState]);
+
+    useEffect(() => {
+        localStorage.setItem('ticker_show_source_name', String(showSourceName));
+    }, [showSourceName]);
+
+    useEffect(() => {
+        localStorage.setItem('ticker_rotation_interval', String(rotationInterval));
+    }, [rotationInterval]);
+
+    useEffect(() => {
+        localStorage.setItem('ticker_scheduler_interval', String(schedulerInterval));
+    }, [schedulerInterval]);
+
+    useEffect(() => {
+        localStorage.setItem('ticker_separator_url', separatorUrl);
+    }, [separatorUrl]);
+
+    // Nota: NO es async porque primero actualizamos el estado, luego hacemos la llamada
+    function handleRotationToggle(checked: boolean) {
+        if (loading) return;  // Prevenir clicks durante loading
+
+        // Actualizar el estado inmediatamente para UI responsive
+        setAutoRotate(checked);
+        setLoading(true);
+
+        // Hacer la llamada API en segundo plano
+        (async () => {
+            try {
+                if (checked) {
+                    setMessage(`🔄 Iniciando rotación automática (${rotationInterval}s)...`);
+                    const result = await startTickerRotation(
+                        rotationInterval,
+                        separatorUrl,
+                        showSourceName
+                    );
+                    if (result.status === 'success') {
+                        setMessage(`✅ ${result.message}`);
+                    } else {
+                        // Revertir el toggle si falló
+                        setAutoRotate(false);
+                        setMessage(`❌ Error: ${result.message}`);
+                    }
+                } else {
+                    setMessage('⏸️ Deteniendo rotación automática...');
+                    const result = await stopTickerRotation();
+                    if (result.status === 'success') {
+                        setMessage(`✅ ${result.message}`);
+                    } else {
+                        // Revertir el toggle si falló
+                        setAutoRotate(true);
+                        setMessage(`❌ Error: ${result.message}`);
+                    }
+                }
+            } catch (error: any) {
+                setMessage(`❌ Error: ${error.message}`);
+                // Revertir el toggle en caso de error
+                setAutoRotate(!checked);
+            } finally {
+                setLoading(false);
+            }
+        })();
+    }
+
+    async function handleSchedulerIntervalUpdate() {
+        if (loading) return;
+
+        setLoading(true);
+        setMessage(`⌛ Actualizando intervalo de scheduler a ${schedulerInterval} min...`);
+
+        try {
+            // Usar la función de api.ts en vez de fetch directo
+            const result = await updateSchedulerInterval(schedulerInterval);
+
+            if (result.status === 'success') {
+                setMessage(`✅ ${result.message}`);
+            } else {
+                setMessage(`❌ Error: ${result.message}`);
+            }
+        } catch (error: any) {
+            setMessage(`❌ Error: ${error.message}`);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    // ==========================================
+    // HANDLERS MODO AUTOMÁTICO
+    // ==========================================
+
+    async function handleStartAutoMode() {
+        if (loading) return;
+
+        setLoading(true);
+        setMessage('🚀 Iniciando modo automático...');
+
+        try {
+            const result = await startAutoMode(
+                rotationInterval,
+                schedulerInterval,
+                separatorUrl,
+                showSourceName
+            );
+
+            if (result.status === 'success') {
+                setMode('auto');
+                setMessage(`✅ ${result.message}`);
+                // Forzar actualización inmediata del estado
+                await loadAutoModeStatus();
+            } else {
+                setMessage(`❌ ${result.message}`);
+            }
+        } catch (error: any) {
+            setMessage(`❌ Error: ${error.message}`);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function handleStopAutoMode() {
+        if (loading) return;
+
+        setLoading(true);
+        setMessage('🛑 Deteniendo modo automático...');
+
+        try {
+            const result = await stopAutoMode();
+
+            if (result.status === 'success') {
+                setMode('manual');
+                setAutoStatus(null);
+                setMessage(`✅ ${result.message}`);
+            } else {
+                setMessage(`❌ ${result.message}`);
+            }
+        } catch (error: any) {
+            setMessage(`❌ Error: ${error.message}`);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function loadAutoModeStatus() {
+        try {
+            const status = await getAutoModeStatus();
+            setAutoStatus(status);
+
+            // Si el backend dice que no está activo pero el frontend cree que sí, sincronizar
+            if (!status.auto_mode_active && mode === 'auto') {
+                setMode('manual');
+            }
+            // Si el backend dice que está activo pero el frontend cree que no, sincronizar
+            if (status.auto_mode_active && mode === 'manual') {
+                setMode('auto');
+            }
+        } catch (error) {
+            console.error('Error loading auto mode status:', error);
+        }
+    }
+
+    // Polling del estado del modo automático cada 5 segundos
+    useEffect(() => {
+        if (mode === 'auto') {
+            // Cargar inmediatamente
+            loadAutoModeStatus();
+
+            // Luego cada 5 segundos
+            const interval = setInterval(loadAutoModeStatus, 5000);
+            return () => clearInterval(interval);
+        }
+    }, [mode]);
+
+    // Persistir modo en localStorage
+    useEffect(() => {
+        localStorage.setItem('ticker_mode', mode);
+    }, [mode]);
+
+
+    async function handleToggleTicker(newState: 'In' | 'Out') {
+        // Prevenir operación manual si está en modo "Todas" (rotación automática)
+        if (category === 'todas') {
+            setMessage('⚠️ No puedes controlar el ticker manualmente en modo "Todas". La rotación automática está activa.');
+            return;
+        }
+
+        setLoading(true);
+        setMessage(newState === 'In' ? '▶️ Mostrando ticker...' : '⏸️ Ocultando ticker...');
+
+        try {
+            const result = await controlTicker(newState, category, 10, separatorUrl, showSourceName, autoScrape);
+
+            if (result.status === 'success') {
+                setTickerState(newState);
+                setMessage(`✅ ${result.message}`);
+            } else if (result.status === 'warning') {
+                setMessage(`⚠️ ${result.message}`);
+            } else {
+                setMessage(`❌ ${result.message}`);
+            }
+        } catch (error: any) {
+            setMessage(`❌ Error: ${error.message}`);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function handleCategoryChange(newCategory: string) {
+        setCategory(newCategory);
+
+        // Si selecciona "Todas", activar rotación automática
+        if (newCategory === 'todas') {
+            // Detener rotación anterior si existe
+            if (autoRotate) {
+                await stopTickerRotation();
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+
+            // Iniciar rotación desde "local"
+            setAutoRotate(true);
+            setMessage(`🔄 Iniciando rotación automática desde LOCAL (${rotationInterval}s)...`);
+
+            const result = await startTickerRotation(
+                rotationInterval,
+                separatorUrl,
+                showSourceName
+            );
+
+            if (result.status === 'success') {
+                setMessage(`✅ ${result.message}`);
+
+                // Si el ticker está oculto, mostrarlo automáticamente
+                if (tickerState === 'Out') {
+                    setMessage('▶️ Mostrando ticker automáticamente...');
+                    const showResult = await controlTicker('In', 'local', 10, separatorUrl, showSourceName, false);
+                    if (showResult.status === 'success') {
+                        setTickerState('In');
+                        setMessage(`✅ Rotación activa - Ticker visible`);
+                    }
+                }
+            } else {
+                setAutoRotate(false);
+                setMessage(`❌ Error: ${result.message}`);
+            }
+            return;
+        }
+
+        // Si cambia de "Todas" a una categoría específica, detener rotación
+        if (autoRotate) {
+            await stopTickerRotation();
+            setAutoRotate(false);
+            setMessage('⏸️ Rotación automática detenida');
+        }
+
+        // Si el ticker está visible, actualizar con la nueva categoría
+        if (tickerState === 'In') {
+            setLoading(true);
+            setMessage('🔄 Cambiando categoría...');
+
+            try {
+                // Primero ocultar (transición de salida)
+                setMessage('⏸️ Ocultando ticker...');
+                await controlTicker('Out', category, 10, separatorUrl, showSourceName, autoScrape);
+                setTickerState('Out');  // Actualizar estado local
+
+                // Esperar tiempo suficiente para animación completa de salida
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                // Luego mostrar con nueva categoría (transición de entrada)
+                setMessage(`▶️ Mostrando ticker con categoría ${newCategory.toUpperCase()}...`);
+                const result = await controlTicker('In', newCategory, 10, separatorUrl, showSourceName, autoScrape);
+
+                if (result.status === 'success') {
+                    setTickerState('In');  // Actualizar estado local
+                    setMessage(`✅ Categoría cambiada a ${newCategory.toUpperCase()}`);
+                } else {
+                    setMessage(`⚠️ ${result.message}`);
+                }
+            } catch (error: any) {
+                setMessage(`❌ Error: ${error.message}`);
+            } finally {
+                setLoading(false);
+            }
+        }
+    }
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div>
+                <h1 className="text-3xl font-bold text-white mb-2">🎬 Control del Ticker</h1>
+                <p className="text-slate-400">
+                    Controla la visibilidad y contenido del ticker de Singular.live
+                </p>
+            </div>
+
+            {/* Message */}
+            {message && (
+                <div className="p-4 bg-slate-800/50 backdrop-blur-lg rounded-xl border border-slate-700 text-slate-300">
+                    {message}
+                </div>
+            )}
+
+            {/* Preview */}
+            {outputUrl ? (
+                <div className="bg-slate-800/50 backdrop-blur-lg rounded-xl border border-slate-700 overflow-hidden">
+                    <div className="p-4 border-b border-slate-700">
+                        <h2 className="text-lg font-semibold text-white">📺 Vista Previa en Vivo</h2>
+                        <p className="text-sm text-slate-400">Output de Singular.live</p>
+                    </div>
+                    <div className="relative bg-black">
+                        <iframe
+                            src={outputUrl}
+                            className="w-full aspect-video"
+                            allow="autoplay"
+                            title="Singular.live Output Preview"
+                        />
+                    </div>
+                </div>
+            ) : (
+                <div className="bg-slate-800/50 backdrop-blur-lg rounded-xl border border-slate-700 p-12 text-center">
+                    <p className="text-slate-400">
+                        ⚠️ Configura tu Control App ID en la página de{' '}
+                        <a href="/config" className="text-indigo-400 hover:underline">
+                            Configuración
+                        </a>{' '}
+                        para ver el preview
+                    </p>
+                </div>
+            )}
+
+            {/* Controls */}
+            <div className="bg-slate-800/50 backdrop-blur-lg rounded-xl border border-slate-700 p-6">
+                <h2 className="text-lg font-semibold text-white mb-6">🎮 Controles</h2>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Visibility Controls */}
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-3">
+                            Visibilidad del Ticker
+                        </label>
+                        <div className="flex space-x-3">
+                            <button
+                                onClick={() => handleToggleTicker('In')}
+                                disabled={tickerState === 'In' || loading || category === 'todas'}
+                                className="flex-1 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-medium transition flex items-center justify-center space-x-2"
+                            >
+                                <span>▶️</span>
+                                <span>Mostrar</span>
+                            </button>
+
+                            <button
+                                onClick={() => handleToggleTicker('Out')}
+                                disabled={tickerState === 'Out' || loading || category === 'todas'}
+                                className="flex-1 px-6 py-3 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-medium transition flex items-center justify-center space-x-2"
+                            >
+                                <span>⏸️</span>
+                                <span>Ocultar</span>
+                            </button>
+                        </div>
+
+                        {/* Estado Visual */}
+                        <div className="mt-3 p-3 bg-slate-900/50 rounded-lg border border-slate-700">
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm text-slate-400">Estado actual:</span>
+                                <span className={`text-sm font-semibold ${tickerState === 'In' ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                    {tickerState === 'In' ? '🟢 Visible' : '⚫ Oculto'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Category Control */}
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-3">
+                            Categoría de Noticias
+                        </label>
+                        <select
+                            value={category}
+                            onChange={(e) => handleCategoryChange(e.target.value)}
+                            disabled={loading}
+                            className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                        >
+                            <option value="todas">🔄 Todas (Rotación Automática)</option>
+                            <option value="local">📍 Local</option>
+                            <option value="nacional">🇧🇴 Nacional</option>
+                            <option value="mundo">🌎 Mundo</option>
+                            <option value="deportes">⚽ Deportes</option>
+                            <option value="economia">💰 Economía</option>
+                            <option value="tecnologia">💻 Tecnología</option>
+                            <option value="entretenimiento">🎬 Entretenimiento</option>
+                        </select>
+
+                        <p className="mt-3 text-xs text-slate-500">
+                            {category === 'todas'
+                                ? 'Rotación automática activa: cambiará entre todas las categorías automáticamente'
+                                : 'Al cambiar categoría con el ticker visible, se hará una transición automática (Out → In)'
+                            }
+                        </p>
+
+                        {/* Input de intervalo - solo visible cuando category === 'todas' */}
+                        {category === 'todas' && (
+                            <div className="mt-4 p-4 bg-gradient-to-r from-purple-900/30 to-indigo-900/30 rounded-lg border border-purple-700">
+                                <label className="text-xs text-slate-300 block mb-2">⏱️ Intervalo de rotación (segundos):</label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="number"
+                                        value={rotationInterval}
+                                        onChange={(e) => setRotationInterval(parseInt(e.target.value) || 60)}
+                                        min="10"
+                                        max="300"
+                                        disabled={loading}
+                                        className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-purple-500 disabled:opacity-50"
+                                    />
+                                    <button
+                                        onClick={async () => {
+                                            if (autoRotate) {
+                                                setMessage(`🔄 Actualizando intervalo a ${rotationInterval}s...`);
+                                                await stopTickerRotation();
+                                                await new Promise(resolve => setTimeout(resolve, 500));
+                                                await startTickerRotation(rotationInterval, separatorUrl, showSourceName);
+                                                setMessage(`✅ Intervalo actualizado a ${rotationInterval}s`);
+                                            }
+                                        }}
+                                        disabled={loading || !autoRotate}
+                                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        Aplicar
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    Cada {rotationInterval} segundos cambiará a la siguiente categoría
+                                </p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Separator URL Control */}
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-3">
+                            🎨 Icono Separador
+                        </label>
+                        <input
+                            type="text"
+                            value={separatorUrl}
+                            onChange={(e) => setSeparatorUrl(e.target.value)}
+                            disabled={loading}
+                            className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50 font-mono text-sm"
+                            placeholder="URL del icono SVG"
+                        />
+                        <p className="mt-3 text-xs text-slate-500">
+                            URL del icono SVG que se muestra entre cada titular
+                        </p>
+                    </div>
+                </div>
+
+                {/* Show Source Name Toggle */}
+                <div className="mt-6 p-4 bg-slate-900/50 rounded-lg border border-slate-700">
+                    <label className="flex items-center justify-between cursor-pointer">
+                        <div>
+                            <span className="text-sm font-medium text-slate-300">📰 Mostrar Nombre de Fuente</span>
+                            <p className="text-xs text-slate-500 mt-1">
+                                Muestra el nombre de la fuente en "Custom Credit" (ej: CORREO DEL SUR)
+                            </p>
+                        </div>
+                        <div className="relative">
+                            <input
+                                type="checkbox"
+                                checked={showSourceName}
+                                onChange={(e) => setShowSourceName(e.target.checked)}
+                                disabled={loading}
+                                className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                        </div>
+                    </label>
+                </div>
+
+
+            </div>
+
+            {/* Scheduler Interval */}
+            <div className="mt-4 p-4 bg-gradient-to-r from-blue-900/30 to-cyan-900/30 rounded-lg border border-blue-700">
+                <div className="mb-3">
+                    <span className="text-sm font-medium text-white">⌛ Intervalo de Scraping Automático</span>
+                    <p className="text-xs text-slate-400 mt-1">
+                        Cada cuántos minutos se ejecutará el scraping automático programado
+                    </p>
+                </div>
+                <div className="flex gap-2">
+                    <input
+                        type="number"
+                        value={schedulerInterval}
+                        onChange={(e) => setSchedulerInterval(parseInt(e.target.value) || 10)}
+                        min="1"
+                        max="60"
+                        disabled={loading}
+                        className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                        placeholder="Minutos"
+                    />
+                    <button
+                        onClick={handleSchedulerIntervalUpdate}
+                        disabled={loading}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                        Aplicar
+                    </button>
+                </div>
+                <p className="text-xs text-slate-500 mt-2">
+                    Valor actual: {schedulerInterval} minutos
+                </p>
+            </div>
+
+            {/* Info Panel */}
+            <div className="bg-slate-800/50 backdrop-blur-lg rounded-xl border border-slate-700 p-6">
+                <h2 className="text-lg font-semibold text-white mb-4">ℹ️ Información</h2>
+
+                <div className="space-y-3 text-sm">
+                    <div className="flex items-start space-x-3">
+                        <span className="text-indigo-400 mt-1">▶️</span>
+                        <div>
+                            <p className="text-white font-medium">Mostrar Ticker</p>
+                            <p className="text-slate-400">
+                                Carga los últimos 10 titulares de la categoría seleccionada y muestra el ticker con animación de entrada
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-start space-x-3">
+                        <span className="text-rose-400 mt-1">⏸️</span>
+                        <div>
+                            <p className="text-white font-medium">Ocultar Ticker</p>
+                            <p className="text-slate-400">
+                                Oculta el ticker con animación de salida
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-start space-x-3">
+                        <span className="text-violet-400 mt-1">🔄</span>
+                        <div>
+                            <p className="text-white font-medium">Cambio de Categoría</p>
+                            <p className="text-slate-400">
+                                Si el ticker está visible, al cambiar categoría se ejecuta automáticamente Out → In para transición suave
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}

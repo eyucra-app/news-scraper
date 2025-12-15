@@ -1,0 +1,9 @@
+{
+    "name": "Correo del Sur - Local (Playwright)",
+    "url": "https://correodelsur.com/local",
+    "container": ".uk-container",
+    "holder": "a[href*=\"/local/202\"] h2",
+    "requires_js": true,
+    "category": "local",
+    "is_active": true
+}
