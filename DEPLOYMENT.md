@@ -1,43 +1,56 @@
 # Deployment Instructions para News Scraper
 
-## Pasos Rápidos para Deploy en Vercel
+## ⚠️ IMPORTANTE: Configuración Correcta de Vercel
+
+El error que viste es porque falta configurar el **Root Directory** en Vercel.
+
+## Pasos CORREGIDOS para Deploy en Vercel
 
 ### 1. Preparar Repositorio Git
 
 ```bash
-# Si no tienes git inicializado
-git init
+# Commitear los cambios actualizados
 git add .
-git commit -m "Ready for Vercel deployment"
+git commit -m "Fix vercel.json configuration"
+git push origin main
 ```
 
-### 2. Subir a GitHub
+### 2. Configurar en Vercel Dashboard
 
-1. Crea un nuevo repositorio en https://github.com/new
-2. Nombre sugerido: `news-scraper`
-3. No inicialices con README
+1. Ve a tu proyecto en https://vercel.com/dashboard
+2. Click en **Settings** (⚙️)
+3. Ve a **General** en el sidebar
+4. Busca la sección **Build & Development Settings**
+5. Configura lo siguiente:
 
+   **Framework Preset:** Next.js
+   
+   **Root Directory:** 
+   - Click en **Edit**
+   - Ingresa: `frontend` ← IMPORTANTE
+   - Click en **Save**
+   
+   **Build Command:** `npm run build` (automático)
+   
+   **Output Directory:** `out` (automático)
+   
+   **Install Command:** `npm install` (automático)
+
+6. Guarda los cambios
+
+### 3. Re-Deploy
+
+**Opción A: Desde Dashboard**
+1. Ve a **Deployments**
+2. Click en el último deployment fallido
+3. Click en el botón **⋯** (tres puntos)
+4. Selecciona **Redeploy**
+
+**Opción B: Nuevo Push**
 ```bash
-git remote add origin https://github.com/TU-USUARIO/news-scraper.git
-git branch -M main
-git push -u origin main
+git commit --allow-empty -m "Trigger redeploy"
+git push
 ```
-
-### 3. Deploy en Vercel
-
-**Opción A: Desde Dashboard (Más fácil)**
-
-1. Ve a https://vercel.com
-2. Sign up / Login con GitHub
-3. Click "Add New" → "Project"
-4. Selecciona tu repositorio `news-scraper`
-5. Configuración:
-   - **Framework Preset**: Next.js
-   - **Root Directory**: `frontend`
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `out`
-6. Click "Deploy"
-7. Espera 2-3 minutos ✨
 
 **Opción B: Con CLI**
 
