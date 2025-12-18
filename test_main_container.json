@@ -1,9 +1,0 @@
-{
-    "name": "Test Playwright - Body Container",
-    "url": "https://correodelsur.com/local",
-    "container": "main",
-    "holder": "h2",
-    "requires_js": true,
-    "category": "local",
-    "is_active": true
-}

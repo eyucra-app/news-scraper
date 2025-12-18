@@ -1,9 +1,0 @@
-{
-  "name": "Correo del Sur - Test Fresh",
-  "url": "https://correodelsur.com/local",
-  "container": "body",
-  "holder": "h2",
-  "requires_js": true,
-  "category": "local",
-  "is_active": true
-}
