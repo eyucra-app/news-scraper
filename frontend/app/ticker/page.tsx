@@ -233,9 +233,34 @@ export default function TickerPage() {
                                 />
                             </div>
                         </div>
-                        {/* <p className="text-xs text-slate-500 mt-2 text-center">
-                            Vista recortada - Solo se muestra el ticker superior
-                        </p> */}
+
+                        {/* URL con copy-to-clipboard */}
+                        <div className="mt-3 flex items-center gap-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700">
+                            <div className="flex-1 min-w-0">
+                                <p className="text-xs text-slate-500 mb-1">Output URL:</p>
+                                <input
+                                    type="text"
+                                    value={outputUrl}
+                                    readOnly
+                                    className="w-full bg-transparent text-sm text-slate-300 outline-none cursor-text select-all"
+                                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                                />
+                            </div>
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard.writeText(outputUrl);
+                                    setMessage('📋 URL copiado al portapapeles');
+                                    setTimeout(() => setMessage(''), 2000);
+                                }}
+                                className="flex-shrink-0 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg transition flex items-center gap-1.5"
+                                title="Copiar URL"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                                Copiar
+                            </button>
+                        </div>
                     </div>
                 ) : (
                     <div className="bg-slate-800/50 backdrop-blur-lg rounded-xl border border-slate-700 p-12 text-center">

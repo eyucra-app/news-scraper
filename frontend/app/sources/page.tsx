@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
     getSources,
     createSource,
     updateSource,
     deleteSource,
     testSource,
+    exportSources,
+    importSources,
 } from '@/lib/api';
 import type { NewsSource, Category } from '@/lib/types';
 import { formatBoliviaTime } from '@/lib/timezone';
@@ -33,6 +35,10 @@ export default function SourcesPage() {
         id: null,
         name: '',
     });
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [importMode, setImportMode] = useState<'add' | 'replace'>('add');
+    const [importMessage, setImportMessage] = useState('');
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         loadSources();
@@ -107,6 +113,68 @@ export default function SourcesPage() {
         }
     }
 
+
+    async function handleExport() {
+        try {
+            // Obtener datos de las fuentes desde el backend
+            const response = await fetch('http://localhost:8000/api/sources/export');
+            const jsonData = await response.text();
+
+            // Generar nombre de archivo con timestamp
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const filename = `news_sources_backup_${timestamp}.json`;
+
+            // Usar API nativa si está disponible (pywebview)
+            if (window.pywebview) {
+                const result = await window.pywebview.api.save_file_dialog(filename, jsonData);
+                if (result.success) {
+                    setTestResult(`✅ Exportado a: ${result.path}`);
+                } else if (result.cancelled) {
+                    setTestResult('ℹ️ Exportación cancelada');
+                } else {
+                    setTestResult(`❌ Error: ${result.error}`);
+                }
+            } else {
+                // Fallback para navegador web (desarrollo)
+                const blob = new Blob([jsonData], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+                setTestResult('📥 Fuentes exportadas');
+            }
+
+            setTimeout(() => setTestResult(''), 5000);
+        } catch (error: any) {
+            setTestResult(`❌ Error al exportar: ${error.message}`);
+        }
+    }
+
+    async function handleImport(event: React.ChangeEvent<HTMLInputElement>) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        try {
+            setImportMessage('⏳ Importando...');
+            const result = await importSources(file, importMode);
+            setImportMessage(`✅ Importación completada\n${result.imported} importadas, ${result.skipped} omitidas`);
+            await loadSources();
+            setTimeout(() => {
+                setShowImportModal(false);
+                setImportMessage('');
+            }, 2000);
+        } catch (error: any) {
+            setImportMessage(`❌ Error: ${error.message}`);
+        }
+
+        // Reset input
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+    }
+
     if (loading) {
         return (
             <div className="flex items-center justify-center h-96">
@@ -126,17 +194,89 @@ export default function SourcesPage() {
                     <h1 className="text-3xl font-bold text-white mb-2">🌐 Fuentes de Noticias</h1>
                     <p className="text-slate-400">Gestiona las fuentes de donde se extraen los titulares</p>
                 </div>
-                <button
-                    onClick={() => {
-                        setEditingSource(null);
-                        setShowForm(true);
-                    }}
-                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition flex items-center space-x-2"
-                >
-                    <span>➕</span>
-                    <span>Nueva Fuente</span>
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={handleExport}
+                        className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition flex items-center space-x-2"
+                        title="Exportar fuentes"
+                    >
+                        <span>📥</span>
+                        <span className="hidden sm:inline">Exportar</span>
+                    </button>
+                    <button
+                        onClick={() => setShowImportModal(true)}
+                        className="px-4 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-lg font-medium transition flex items-center space-x-2"
+                        title="Importar fuentes"
+                    >
+                        <span>📤</span>
+                        <span className="hidden sm:inline">Importar</span>
+                    </button>
+                    <button
+                        onClick={() => {
+                            setEditingSource(null);
+                            setShowForm(true);
+                        }}
+                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition flex items-center space-x-2"
+                    >
+                        <span>➕</span>
+                        <span>Nueva Fuente</span>
+                    </button>
+                </div>
             </div>
+
+            {/* Import Modal */}
+            {showImportModal && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 max-w-md w-full">
+                        <h3 className="text-xl font-bold text-white mb-4">📤 Importar Fuentes</h3>
+
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-slate-300 mb-2">Modo de Importación</label>
+                            <select
+                                value={importMode}
+                                onChange={(e) => setImportMode(e.target.value as 'add' | 'replace')}
+                                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-violet-500"
+                            >
+                                <option value="add">Agregar a existentes</option>
+                                <option value="replace">Reemplazar todas</option>
+                            </select>
+                            <p className="text-xs text-slate-500 mt-1">
+                                {importMode === 'add'
+                                    ? 'Las fuentes nuevas se agregarán, las existentes se omitirán'
+                                    : '⚠️ Se eliminarán todas las fuentes actuales'}
+                            </p>
+                        </div>
+
+                        <div className="mb-4">
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".json"
+                                onChange={handleImport}
+                                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-violet-600 file:text-white hover:file:bg-violet-700"
+                            />
+                        </div>
+
+                        {importMessage && (
+                            <div className="mb-4 p-3 bg-slate-900/50 rounded-lg text-sm text-slate-300 whitespace-pre-line">
+                                {importMessage}
+                            </div>
+                        )}
+
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => {
+                                    setShowImportModal(false);
+                                    setImportMessage('');
+                                }}
+                                className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition"
+                            >
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Test Result */}
             {testResult && (

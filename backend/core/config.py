@@ -29,7 +29,23 @@ class Settings(BaseSettings):
     # =================================
     # Base de datos (SQLite para deployment local)
     # =================================
-    DATABASE_URL: str = "sqlite+aiosqlite:///./news_scraper.db"
+    @property
+    def DATABASE_URL(self) -> str:
+        """Obtiene la URL de la base de datos con ruta persistente."""
+        import os
+        from pathlib import Path
+        
+        # Usar AppData en Windows, home en otros sistemas
+        if os.name == 'nt':  # Windows
+            app_data = Path(os.getenv('APPDATA')) / 'NewsScraper'
+        else:  # Linux/Mac
+            app_data = Path.home() / '.newsscraper'
+        
+        # Crear directorio si no existe
+        app_data.mkdir(parents=True, exist_ok=True)
+        
+        db_path = app_data / 'news_scraper.db'
+        return f"sqlite+aiosqlite:///{db_path}"
     
     # =================================
     # Redis (Opcional - usar cache en memoria si no está disponible)
@@ -87,7 +103,8 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://localhost:8000", 
         "http://127.0.0.1:3000",
-        "https://news-scraper.vercel.app",  # Dominio de producción
+        "https://news-scraper-v1.vercel.app",  # Dominio de producción (actual)
+        "https://news-scraper.vercel.app",     # Dominio alternativo
         "https://*.vercel.app"  # Dominios de preview
     ]
     

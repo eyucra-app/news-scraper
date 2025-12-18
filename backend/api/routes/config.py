@@ -150,7 +150,7 @@ async def test_singular_connection():
     Prueba la conexión con Singular.live obteniendo info del Control App.
     
     Returns:
-        dict: Resultado del test con outputUrl si es exitoso
+        dict: Resultado del test con output URL si es exitoso
     """
     logger.info("Probando conexión con Singular.live")
     
@@ -168,3 +168,106 @@ async def test_singular_connection():
             "status": "error",
             "message": "Fallo en conexión con Singular.live. Verifica tu Control App ID."
         }
+
+
+@router.get("/export")
+async def export_config(db: AsyncSession = Depends(get_database)):
+    """
+    Exporta la configuración completa de la aplicación a JSON.
+    
+    Returns:
+        JSONResponse: Configuración en formato JSON para descarga
+    """
+    from fastapi.responses import JSONResponse
+    
+    # Obtener toda la configuración de la BD
+    from db.models import AppConfig
+    result = await db.execute(select(AppConfig))
+    config_entries = result.scalars().all()
+    
+    config_data = {}
+    for entry in config_entries:
+        config_data[entry.key] = entry.value
+    
+    # Agregar configuración de settings
+    export_data = {
+        "database_config": config_data,
+        "app_settings": {
+            "scraping_interval": settings.SCRAPING_INTERVAL,
+            "environment": settings.ENVIRONMENT
+        },
+        "exported_at": datetime.utcnow().isoformat()
+    }
+    
+    return JSONResponse(
+        content=export_data,
+        headers={
+            "Content-Disposition": f"attachment; filename=app_config_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+        }
+    )
+
+
+@router.post("/import")
+async def import_config(
+    import_data: dict,
+    db: AsyncSession = Depends(get_database)
+):
+    """
+    Importa configuración desde JSON.
+    
+    Args:
+        import_data: Datos JSON con configuración
+        db: Sesión de base de datos
+    
+    Returns:
+        dict: Resultado de la importación
+    """
+    if "database_config" not in import_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo debe contener 'database_config'"
+        )
+    
+    from db.models import AppConfig
+    imported = 0
+    errors = []
+    
+    # Importar configuración de BD
+    for key, value in import_data.get("database_config", {}).items():
+        try:
+            result = await db.execute(
+                select(AppConfig).where(AppConfig.key == key)
+            )
+            config_entry = result.scalar_one_or_none()
+            
+            if config_entry:
+                config_entry.value = value
+                config_entry.updated_at = datetime.utcnow()
+            else:
+                config_entry = AppConfig(
+                    key=key,
+                    value=value,
+                    description=f"Importado el {datetime.utcnow().isoformat()}"
+                )
+                db.add(config_entry)
+            imported += 1
+            
+        except Exception as e:
+            errors.append(f"Error importando '{key}': {str(e)}")
+    
+    await db.commit()
+    
+    # Actualizar settings en runtime
+    if "singular_control_app_id" in import_data.get("database_config", {}):
+        settings.SINGULAR_CONTROL_APP_ID = import_data["database_config"]["singular_control_app_id"]
+    if "singular_output_url" in import_data.get("database_config", {}):
+        settings.SINGULAR_OUTPUT_URL = import_data["database_config"]["singular_output_url"]
+    
+    logger.info(f"Configuración importada: {imported} entradas, {len(errors)} errores")
+    
+    return {
+        "status": "success" if imported > 0 else "partial",
+        "imported": imported,
+        "errors": errors,
+        "message": f"Configuración importada: {imported} entradas"
+    }

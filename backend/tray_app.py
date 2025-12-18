@@ -74,8 +74,8 @@ class NewsScraperTrayApp:
     
     def open_app(self, icon=None, item=None):
         """Abre la aplicación en el navegador."""
-        print("🌐 Abriendo aplicación en el navegador...")
-        webbrowser.open("https://news-scraper.vercel.app")
+        print("Abriendo aplicacion en el navegador...")
+        webbrowser.open("http://localhost:8000")
     
     def open_local_docs(self, icon=None, item=None):
         """Abre la documentación de la API local."""
@@ -190,8 +190,8 @@ X-GNOME-Autostart-enabled=true
         # Ejecutar
         print("✓ News Scraper ejecutándose en la bandeja del sistema")
         print(f"📍 Sistema operativo: {self.os_name}")
-        print(f"🌐 Frontend: https://news-scraper.vercel.app")
-        print(f"🔧 API Backend: http://localhost:8000")
+        print(f"🌐 Aplicación: http://localhost:8000")
+        print(f"🔧 API Backend: http://localhost:8000/api")
         print(f"📚 Documentación: http://localhost:8000/docs")
         
         self.icon.run()

@@ -364,3 +364,57 @@ export async function getHealth(): Promise<HealthStatus> {
     const response = await fetchWithTimeout(`${BACKEND_BASE_URL}/health`);
     return handleResponse<HealthStatus>(response);
 }
+
+// ==================== EXPORT/IMPORT ====================
+
+export async function exportSources(): Promise<void> {
+    const response = await fetchWithTimeout(`${BACKEND_BASE_URL}/api/sources/export`);
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `news_sources_backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+}
+
+export async function importSources(file: File, mode: 'add' | 'replace' = 'add'): Promise<{ status: string; imported: number; skipped: number; errors: string[] }> {
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    const response = await fetchWithTimeout(`${BACKEND_BASE_URL}/api/sources/import?mode=${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+
+    return handleResponse(response);
+}
+
+export async function exportConfig(): Promise<void> {
+    const response = await fetchWithTimeout(`${BACKEND_BASE_URL}/api/config/export`);
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `app_config_backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+}
+
+export async function importConfig(file: File): Promise<{ status: string; imported: number; errors: string[] }> {
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    const response = await fetchWithTimeout(`${BACKEND_BASE_URL}/api/config/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+
+    return handleResponse(response);
+}

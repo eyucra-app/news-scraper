@@ -95,6 +95,126 @@ async def list_sources(
     return sources
 
 
+@router.get("/export")
+async def export_sources(db: AsyncSession = Depends(get_database)):
+    """
+    Exporta todas las fuentes a JSON para backup/compartir.
+    
+    Returns:
+        dict: Todas las fuentes en formato JSON
+    """
+    from fastapi.responses import JSONResponse
+    
+    stmt = select(NewsSource)
+    result = await db.execute(stmt)
+    sources = result.scalars().all()
+    
+    sources_data = []
+    for source in sources:
+        sources_data.append({
+            "name": source.name,
+            "url": source.url,
+            "container": source.container,
+            "holder": source.holder,
+            "data_field": source.data_field,
+            "requires_js": source.requires_js,
+            "category": source.category.value,
+            "is_active": source.is_active
+        })
+    
+    return JSONResponse(
+        content={
+            "sources": sources_data,
+            "exported_at": datetime.utcnow().isoformat(),
+            "total_sources": len(sources_data)
+        },
+        headers={
+            "Content-Disposition": f"attachment; filename=news_sources_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+        }
+    )
+
+
+@router.post("/import")
+async def import_sources(
+    import_data: dict,
+    mode: str = "add",  # "add" o "replace"
+    db: AsyncSession = Depends(get_database)
+):
+    """
+    Importa fuentes desde JSON.
+    
+    Args:
+        import_data: Datos JSON con fuentes
+        mode: "add" para agregar, "replace" para reemplazar todas
+        db: Sesión de base de datos
+    
+    Returns:
+        dict: Resultado de la importación
+    """
+    if "sources" not in import_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo debe contener un campo 'sources'"
+        )
+    
+    sources_to_import = import_data["sources"]
+    
+    if mode == "replace":
+        # Eliminar todas las fuentes existentes
+        stmt = select(NewsSource)
+        result = await db.execute(stmt)
+        existing_sources = result.scalars().all()
+        for source in existing_sources:
+            await db.delete(source)
+        # Commit para ejecutar la eliminación antes de insertar nuevas
+        await db.commit()
+    
+    # Importar fuentes
+    imported = 0
+    skipped = 0
+    errors = []
+    
+    for source_data in sources_to_import:
+        try:
+            # Verificar si ya existe (solo en modo "add")
+            if mode == "add":
+                stmt = select(NewsSource).where(NewsSource.name == source_data["name"])
+                result = await db.execute(stmt)
+                existing = result.scalar_one_or_none()
+                if existing:
+                    skipped += 1
+                    continue
+            
+            # Crear fuente
+            source = NewsSource(
+                name=source_data["name"],
+                url=source_data["url"],
+                container=source_data["container"],
+                holder=source_data["holder"],
+                data_field=source_data.get("data_field"),
+                requires_js=source_data.get("requires_js", False),
+                category=CategoryEnum(source_data["category"]),
+                is_active=source_data.get("is_active", True)
+            )
+            db.add(source)
+            imported += 1
+            
+        except Exception as e:
+            errors.append(f"Error importando '{source_data.get('name', 'unknown')}': {str(e)}")
+    
+    await db.commit()
+    
+    logger.info(f"Importación completada: {imported} importadas, {skipped} omitidas, {len(errors)} errores")
+    
+    return {
+        "status": "success" if imported > 0 else "partial",
+        "imported": imported,
+        "skipped": skipped,
+        "errors": errors,
+        "message": f"Importación completada: {imported} fuentes importadas"
+    }
+
+
 @router.post("/", response_model=NewsSourceResponse, status_code=status.HTTP_201_CREATED)
 async def create_source(
     source_data: NewsSourceCreate,

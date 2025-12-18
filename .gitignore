@@ -80,3 +80,13 @@ Thumbs.db
 # Testing
 coverage/
 .nyc_output/
+
+# PyInstaller
+dist/
+build/
+*.spec.bak
+*.exe
+installer_output/
+
+# Playwright
+.playwright/
